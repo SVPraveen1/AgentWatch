@@ -1,0 +1,64 @@
+@keyframes aw-float {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -1.5px, 0); }
+}
+
+@keyframes aw-cheer {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  25% { transform: translate3d(0, -4px, 0) scale(1.08) rotate(-5deg); }
+  55% { transform: translate3d(0, -3px, 0) scale(1.06) rotate(5deg); }
+  100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+}
+
+@keyframes aw-alert {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  25% { transform: translate3d(-1.5px, -1px, 0) rotate(-4deg); }
+  75% { transform: translate3d(1.5px, -1px, 0) rotate(4deg); }
+}
+
+@keyframes aw-click-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18) rotate(-8deg); }
+  70% { transform: scale(0.95) rotate(4deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+@keyframes aw-zzz {
+  0% { opacity: 0; transform: translate3d(0, 2px, 0) scale(0.8); }
+  40% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate3d(4px, -7px, 0) scale(1.05); }
+}
+
+.aw-mascot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  will-change: transform;
+  transform-origin: center bottom;
+}
+
+.aw-mascot--working {
+  animation: aw-float 2.4s ease-in-out infinite;
+}
+
+.aw-mascot--cheer {
+  animation: aw-cheer 650ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+}
+
+.aw-mascot--alert {
+  animation: aw-alert 520ms ease-in-out infinite;
+}
+
+.aw-mascot--clicked {
+  animation: aw-click-pop 420ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+}
+
+.aw-mascot-zzz {
+  animation: aw-zzz 2.2s ease-out infinite;
+}
+
+.aw-mascot--paused *,
+.aw-mascot--paused {
+  animation-play-state: paused !important;
+}

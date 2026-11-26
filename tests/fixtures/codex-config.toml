@@ -1,0 +1,8 @@
+# User Codex configuration with comments that must survive round-trip
+model = "gpt-5.3-codex"
+approval_policy = "on-request"
+
+# Existing TUI settings
+[tui]
+notifications = ["agent-turn-complete", "approval-requested"] # keep inline comment
+notification_condition = "unfocused"

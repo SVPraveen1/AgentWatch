@@ -1,0 +1,5 @@
+{"type":"user","timestamp":"2026-11-26T08:00:00.000Z","message":{"role":"user","content":"Add usage limit tracking"}}
+{"type":"assistant","uuid":"u1","timestamp":"2026-11-26T08:01:00.000Z","message":{"id":"msg-1","model":"claude-sonnet-4-5","role":"assistant","content":[{"type":"text","text":"Working on it."}],"usage":{"input_tokens":1200,"output_tokens":300,"cache_creation_input_tokens":500,"cache_read_input_tokens":2000}}}
+{"type":"assistant","uuid":"u1-dup","timestamp":"2026-11-26T08:01:05.000Z","message":{"id":"msg-1","model":"claude-sonnet-4-5","role":"assistant","content":[{"type":"text","text":"Working on it."}],"usage":{"input_tokens":1200,"output_tokens":300,"cache_creation_input_tokens":500,"cache_read_input_tokens":2000}}}
+{malformed json line should never crash parser
+{"type":"assistant","uuid":"u2","timestamp":"2026-11-26T09:10:00.000Z","message":{"id":"msg-2","model":"claude-opus-4-1","role":"assistant","content":[{"type":"text","text":"Done."}],"usage":{"input_tokens":800,"output_tokens":200,"cache_creation_input_tokens":0,"cache_read_input_tokens":1000}}}

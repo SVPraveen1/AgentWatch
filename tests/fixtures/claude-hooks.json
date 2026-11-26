@@ -1,0 +1,61 @@
+{
+  "sessionStart": {
+    "session_id": "cl-session-001",
+    "cwd": "C:\\Users\\dev\\workspace\\billing",
+    "hook_event_name": "SessionStart",
+    "transcript_path": "C:\\Users\\dev\\.claude\\projects\\C--Users-dev-workspace-billing\\cl-session-001.jsonl",
+    "source": "startup",
+    "permission_mode": "default"
+  },
+  "userPromptSubmit": {
+    "session_id": "cl-session-001",
+    "cwd": "C:\\Users\\dev\\workspace\\billing",
+    "hook_event_name": "UserPromptSubmit",
+    "prompt": "Switch billing to usage-based tiers and run the test suite",
+    "permission_mode": "default"
+  },
+  "preToolUse": {
+    "session_id": "cl-session-001",
+    "cwd": "C:\\Users\\dev\\workspace\\billing",
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "pnpm test"
+    }
+  },
+  "permissionRequest": {
+    "session_id": "cl-session-001",
+    "cwd": "C:\\Users\\dev\\workspace\\billing",
+    "hook_event_name": "PermissionRequest",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "pnpm prisma migrate deploy"
+    },
+    "permission_suggestions": [
+      {
+        "type": "toolAlwaysAllow",
+        "tool": "Bash"
+      }
+    ]
+  },
+  "stop": {
+    "session_id": "cl-session-001",
+    "cwd": "C:\\Users\\dev\\workspace\\billing",
+    "hook_event_name": "Stop",
+    "stop_hook_active": false,
+    "last_assistant_message": "Updated billing plans.\nAGENTWATCH_SUMMARY: Billing is on usage-based plans. Two migrations applied and all 38 tests pass.",
+    "transcript_path": "C:\\Users\\dev\\.claude\\projects\\C--Users-dev-workspace-billing\\cl-session-001.jsonl"
+  },
+  "stopFailure": {
+    "session_id": "cl-session-001",
+    "cwd": "C:\\Users\\dev\\workspace\\billing",
+    "hook_event_name": "StopFailure",
+    "error_type": "rate_limit",
+    "error_message": "Rate limit exceeded"
+  },
+  "sessionEnd": {
+    "session_id": "cl-session-001",
+    "cwd": "C:\\Users\\dev\\workspace\\billing",
+    "hook_event_name": "SessionEnd"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "notifyTurnComplete": {
+    "type": "agent-turn-complete",
+    "thread-id": "codex-thread-001",
+    "turn-id": "turn-42",
+    "cwd": "C:\\Users\\dev\\workspace\\api-gateway",
+    "input-messages": ["Add rate limit header parsing"],
+    "last-assistant-message": "Added rate limit parser and unit tests.\nAGENTWATCH_SUMMARY: Added rate limit header parser and 12 passing tests."
+  },
+  "hookPreToolUse": {
+    "session_id": "codex-thread-001",
+    "cwd": "C:\\Users\\dev\\workspace\\api-gateway",
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "cargo test"
+    }
+  },
+  "hookStop": {
+    "session_id": "codex-thread-001",
+    "cwd": "C:\\Users\\dev\\workspace\\api-gateway",
+    "hook_event_name": "Stop",
+    "last_assistant_message": "All checks pass."
+  }
+}

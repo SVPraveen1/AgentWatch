@@ -1,0 +1,39 @@
+appId: com.agentwatch.desktop
+productName: AgentWatch
+copyright: Copyright © AgentWatch Contributors
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist-electron/**/*
+  - dist-renderer/**/*
+  - package.json
+extraResources:
+  - from: resources/bin/win-x64
+    to: bin/win-x64
+    filter:
+      - "*.exe"
+  - from: resources/bin/win-arm64
+    to: bin/win-arm64
+    filter:
+      - "*.exe"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+  # Code signing is deferred for v1. To enable Authenticode signing later:
+  # 1. Supply CSC_LINK and CSC_KEY_PASSWORD env vars, or configure signtoolOptions.sign
+  # 2. Example: signtoolOptions: { publisherName: "Your Publisher", signingHashAlgorithms: ["sha256"] }
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  shortcutName: AgentWatch
+  include: build/installer.nsh
+  deleteAppDataOnUninstall: false
