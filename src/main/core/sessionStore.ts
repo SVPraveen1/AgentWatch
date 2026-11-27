@@ -89,12 +89,15 @@ export class SessionStore {
       case 'prompt_submitted':
         session.state = 'working';
         session.pendingPermission = undefined;
+        session.pendingPermissions = undefined;
         session.endedReason = undefined;
         break;
       case 'working':
         session.state = 'working';
         session.lastTool = event.toolName;
-        session.pendingPermission = undefined;
+        if (!session.pendingPermissions || session.pendingPermissions.length === 0) {
+          session.pendingPermission = undefined;
+        }
         if (event.summary) session.summary = event.summary;
         break;
       case 'permission_requested':
@@ -102,8 +105,12 @@ export class SessionStore {
         if (event.summary) session.summary = event.summary;
         break;
       case 'permission_resolved':
-        session.pendingPermission = undefined;
-        session.state = event.decision === 'deny' ? 'needs_you' : 'working';
+        if (event.decision === 'deny') {
+          session.state = 'needs_you';
+        } else if (!session.pendingPermissions || session.pendingPermissions.length === 0) {
+          session.pendingPermission = undefined;
+          session.state = 'working';
+        }
         break;
       case 'needs_input':
         session.state = 'needs_you';
@@ -112,16 +119,19 @@ export class SessionStore {
       case 'turn_finished':
         session.state = 'done';
         session.pendingPermission = undefined;
+        session.pendingPermissions = undefined;
         if (event.summary) session.summary = event.summary;
         break;
       case 'error':
         session.state = 'error';
         session.pendingPermission = undefined;
+        session.pendingPermissions = undefined;
         session.summary = event.summary || event.errorMessage || 'Agent encountered an error.';
         break;
       case 'session_ended':
         session.state = 'ended';
         session.pendingPermission = undefined;
+        session.pendingPermissions = undefined;
         session.endedReason = 'hook';
         break;
     }
@@ -136,17 +146,24 @@ export class SessionStore {
   attachPendingPermission(sessionId: string, pending: PendingPermission): void {
     const s = this.sessions.get(sessionId);
     if (!s) return;
-    s.pendingPermission = pending;
+    const existing = s.pendingPermissions ?? (s.pendingPermission ? [s.pendingPermission] : []);
+    const filtered = existing.filter((p) => p.requestId !== pending.requestId);
+    filtered.push(pending);
+    s.pendingPermissions = filtered;
+    s.pendingPermission = filtered[0];
     s.state = 'needs_you';
     this.save();
   }
 
   clearPendingPermission(sessionId: string, requestId: string, nextState: SessionState): void {
     const s = this.sessions.get(sessionId);
-    if (!s || s.pendingPermission?.requestId !== requestId) return;
-    s.pendingPermission = undefined;
+    if (!s) return;
+    const existing = s.pendingPermissions ?? (s.pendingPermission ? [s.pendingPermission] : []);
+    const filtered = existing.filter((p) => p.requestId !== requestId);
+    s.pendingPermissions = filtered.length > 0 ? filtered : undefined;
+    s.pendingPermission = filtered[0];
     if (s.state !== 'ended') {
-      s.state = nextState;
+      s.state = filtered.length > 0 ? 'needs_you' : nextState;
     }
     this.save();
   }
@@ -210,6 +227,14 @@ export class SessionStore {
       }
     }
     this.save();
+  }
+
+  dismissSession(sessionId: string): boolean {
+    const existed = this.sessions.delete(sessionId);
+    if (existed) {
+      this.save();
+    }
+    return existed;
   }
 
   filterHistory(filter: { agent?: AgentId | 'all'; state?: SessionState | 'all'; search?: string }): SessionRecord[] {

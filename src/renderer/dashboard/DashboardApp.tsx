@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { APP_NAME } from '../../shared/constants';
+import type { DiagnosticBundle } from '../../shared/ipc';
 import type { AgentId, AppSnapshot, LogLevel, SessionState, ThemeMode } from '../../shared/types';
 import { Mascot } from '../components/Mascot';
 import { UsagePanel } from './UsagePanel';
@@ -17,6 +18,9 @@ export const DashboardApp: React.FC = () => {
   const [displays, setDisplays] = useState<Array<{ id: number; label: string; primary: boolean }>>([]);
   const [terminalFeedback, setTerminalFeedback] = useState<string | null>(null);
   const [updateStubMsg, setUpdateStubMsg] = useState<string | null>(null);
+  const [diagnosticsBundle, setDiagnosticsBundle] = useState<DiagnosticBundle | null>(null);
+  const [isRunningDiag, setIsRunningDiag] = useState(false);
+  const [diagCopied, setDiagCopied] = useState(false);
 
   useEffect(() => {
     void window.agentwatch?.getSnapshot().then(setSnapshot);
@@ -545,6 +549,22 @@ export const DashboardApp: React.FC = () => {
                         >
                           Open Terminal
                         </button>
+                        {(s.state === 'done' || s.state === 'ended') && (
+                          <button
+                            onClick={() => void window.agentwatch?.dismissSession(s.id)}
+                            style={{
+                              padding: '4px 9px',
+                              fontSize: 11,
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid var(--border-subtle)',
+                              background: 'transparent',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Dismiss
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
@@ -1243,6 +1263,122 @@ export const DashboardApp: React.FC = () => {
               </div>
               {updateStubMsg && (
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{updateStubMsg}</div>
+              )}
+            </section>
+
+            <section
+              style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                padding: 16,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <strong style={{ fontSize: 14 }}>System Self-Test & Diagnostics</strong>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                    Verify local loopback health, adapter hooks, Win32 helper, and display scaling.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    disabled={isRunningDiag}
+                    onClick={() => {
+                      setIsRunningDiag(true);
+                      void window.agentwatch?.runDiagnostics().then((bundle) => {
+                        setDiagnosticsBundle(bundle);
+                        setIsRunningDiag(false);
+                      });
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: 'none',
+                      background: 'var(--accent-primary)',
+                      color: 'var(--text-on-accent)',
+                      fontWeight: 600,
+                      cursor: isRunningDiag ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {isRunningDiag ? 'Running...' : 'Run Diagnostics'}
+                  </button>
+                  {diagnosticsBundle && (
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(diagnosticsBundle.markdown).then(() => {
+                          setDiagCopied(true);
+                          setTimeout(() => setDiagCopied(false), 3000);
+                        });
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border-strong)',
+                        background: 'var(--bg-surface-elevated)',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {diagCopied ? 'Copied!' : 'Copy Support Bundle'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {diagnosticsBundle && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                  {diagnosticsBundle.checks.map((chk, idx) => {
+                    const statusColor =
+                      chk.status === 'pass'
+                        ? 'var(--status-done)'
+                        : chk.status === 'warn'
+                          ? 'var(--status-needs-you)'
+                          : 'var(--status-error)';
+                    const statusBg =
+                      chk.status === 'pass'
+                        ? 'var(--status-done-bg)'
+                        : chk.status === 'warn'
+                          ? 'var(--status-needs-you-bg)'
+                          : 'var(--status-error-bg)';
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: 'var(--bg-canvas)',
+                          border: '1px solid var(--border-subtle)',
+                          fontSize: 12,
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span style={{ fontWeight: 600 }}>{chk.name}</span>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{chk.details}</span>
+                        </div>
+                        <span
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: 'var(--radius-pill)',
+                            background: statusBg,
+                            color: statusColor,
+                            fontWeight: 700,
+                            fontSize: 10.5,
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          {chk.status}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </section>
 
