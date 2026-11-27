@@ -97,6 +97,22 @@ export const OverlayApp: React.FC = () => {
   const [terminalMsg, setTerminalMsg] = useState<string | null>(null);
   const [lastTurnFinishedAt, setLastTurnFinishedAt] = useState<number>(0);
   const seenTurnIdRef = useRef<string>('');
+  const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnter = () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      window.agentwatch?.setOverlayHover(true);
+    }, 120);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    window.agentwatch?.setOverlayHover(false);
+  };
 
   useEffect(() => {
     const latestTurn = snapshot?.history.find((h) => h.type === 'turn_finished');
@@ -148,8 +164,8 @@ export const OverlayApp: React.FC = () => {
       }}
     >
       <div
-        onMouseEnter={() => window.agentwatch?.setOverlayHover(true)}
-        onMouseLeave={() => window.agentwatch?.setOverlayHover(false)}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         style={{
           pointerEvents: 'auto',
           background: 'var(--bg-notch)',
@@ -386,6 +402,48 @@ export const OverlayApp: React.FC = () => {
                     </button>
                   </div>
                 )}
+
+                {pendingList.length > 1 && (
+                  <div
+                    style={{
+                      borderTop: '1px dashed var(--border-subtle)',
+                      paddingTop: 6,
+                      marginTop: 2,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 3,
+                    }}
+                  >
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      + {pendingList.length - 1} other queued permission{pendingList.length > 2 ? 's' : ''}:
+                    </span>
+                    {pendingList.slice(1, 4).map((p) => (
+                      <div
+                        key={p.requestId}
+                        style={{
+                          fontSize: 10.5,
+                          color: 'var(--text-secondary)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 6,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{p.toolName}</span>
+                        <span
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            maxWidth: 240,
+                          }}
+                        >
+                          {p.commandOrAction}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -446,6 +504,26 @@ export const OverlayApp: React.FC = () => {
                         >
                           Open Terminal
                         </button>
+                        {(s.state === 'done' || s.state === 'ended') && (
+                          <button
+                            title="Dismiss session"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void window.agentwatch?.dismissSession(s.id);
+                            }}
+                            style={{
+                              padding: '2px 5px',
+                              fontSize: 11,
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid var(--border-subtle)',
+                              background: 'transparent',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
