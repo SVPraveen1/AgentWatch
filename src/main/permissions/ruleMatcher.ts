@@ -40,19 +40,27 @@ const SINGLE_TOKEN_COMMANDS = new Set([
 ]);
 
 const DESTRUCTIVE_PATTERNS: Array<{ regex: RegExp; reason: string }> = [
-  { regex: /(?:^|\s|;|&&|\|)rm\s+(?:-[a-zA-Z]*[rf][a-zA-Z]*|--recursive|--force)/i, reason: 'Recursive or forced file deletion (rm)' },
-  { regex: /\brmdir\s+\/s\b|\bdel\s+\/[sfq]/i, reason: 'Recursive/forced Windows deletion' },
-  { regex: /\bRemove-Item\b[^\n]*-(?:Recurse|Force)\b/i, reason: 'PowerShell recursive/forced Remove-Item' },
+  // Recursive or forced deletions (catches "rm -rf", split flags "rm -r /dir -f", "rm -R", etc.)
+  { regex: /\brm\b[^\n]*(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)/i, reason: 'Recursive file deletion (rm -r)' },
+  { regex: /\brm\b[^\n]*(?:-[a-zA-Z]*f[a-zA-Z]*|--force)/i, reason: 'Forced file deletion (rm -f)' },
+  { regex: /\bfind\b[^\n]*(?:-delete|-exec\s+rm\b)/i, reason: 'Recursive file deletion with find' },
+  { regex: /\b(?:rmdir|rd)\b[^\n]*\/s/i, reason: 'Recursive Windows directory deletion' },
+  { regex: /\b(?:del|erase)\b[^\n]*\/[sfq]/i, reason: 'Forced/recursive Windows file deletion' },
+  { regex: /\b(?:Remove-Item|ri)\b[^\n]*-(?:Recurse|Force|r|fo)\b/i, reason: 'PowerShell recursive/forced Remove-Item' },
   { regex: /\bgit\s+push\b[^\n]*(?:\s-f\b|--force(?:-with-lease)?\b)/i, reason: 'Forced git push' },
-  { regex: /\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-[a-zA-Z]*f/i, reason: 'Destructive git reset/clean' },
+  { regex: /\bgit\s+reset\s+--hard\b|\bgit\s+clean\b[^\n]*-[a-zA-Z]*f/i, reason: 'Destructive git reset or clean' },
+  { regex: /\bgit\s+checkout\b[^\n]*(?:\s-f\b|--force\b)/i, reason: 'Forced git checkout discarding changes' },
+  { regex: /\bgit\s+branch\b[^\n]*(?:\s-D\b|--delete\s+--force\b)/i, reason: 'Force branch deletion' },
   { regex: /\b(?:format(?:\.com|\.exe)?|diskpart|mkfs(?:\.[a-z0-9]+)?|fdisk|parted|shred|wipefs|bcdedit)\b/i, reason: 'Disk formatting or partition command' },
   { regex: /\bdd\s+[^\n]*\bof=/i, reason: 'Raw disk/file overwrite with dd' },
   { regex: /\b(?:shutdown|Stop-Computer|Restart-Computer|reg\s+delete)\b/i, reason: 'System shutdown or registry deletion' },
   { regex: /\b(?:DROP\s+(?:DATABASE|SCHEMA|TABLE)|TRUNCATE\s+TABLE)\b/i, reason: 'Destructive SQL schema/data drop' },
-  { regex: /\bprisma\s+(?:migrate\s+reset|db\s+push\s+--force-reset)\b/i, reason: 'Database reset command' },
+  { regex: /\b(?:prisma|drizzle-kit|supabase)\s+(?:migrate\s+reset|db\s+push\s+--force-reset|db\s+reset)\b/i, reason: 'Database reset command' },
   { regex: /(?:curl|wget|irm|Invoke-WebRequest)\b[^\n]*\|\s*(?:sh|bash|pwsh|powershell|iex|Invoke-Expression)\b/i, reason: 'Piped remote script execution' },
-  { regex: /\bchmod\s+-R\s+777\s+\/(?:\s|$)/i, reason: 'Root recursive chmod 777' },
-  { regex: /\b(?:Write|Edit|MultiEdit|apply_patch)\b[^\n]*(?:\.env|id_rsa|authorized_keys|system32)/i, reason: 'Sensitive system or secret file modification' },
+  { regex: /\b(?:sh|bash|zsh|cmd|powershell|pwsh)\s+(?:-c|-Command|\/c)\s+["'][^"']*\b(?:rm\s+-[a-zA-Z]*[rf]|del\s+\/|Remove-Item)\b/i, reason: 'Subshell wrapped destructive command' },
+  { regex: /\bchmod\s+-R\s+(?:777|000)\s+\/(?:\s|$)/i, reason: 'Root recursive dangerous chmod' },
+  { regex: /\b(?:Write|Edit|MultiEdit|apply_patch)\b[^\n]*(?:\.env|id_rsa|id_ed25519|authorized_keys|system32|\.ssh[\/\\]|\.aws[\/\\])/i, reason: 'Sensitive system or secret file modification' },
+  { regex: /(?:>|>>)\s*[^\n]*(?:\.env|id_rsa|authorized_keys|\.ssh[\/\\])/i, reason: 'Shell redirection into secret or auth file' },
 ];
 
 export function checkDestructiveCommand(

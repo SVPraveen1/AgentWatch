@@ -8,7 +8,7 @@ import {
   DEFAULT_TURN_EXPAND_MS,
   FEATURE_FLAGS,
 } from '../../shared/constants';
-import type { AppSettings, LogLevel } from '../../shared/types';
+import type { AppSettings, LogLevel, ThemeMode } from '../../shared/types';
 import type { DeepPartial } from '../../shared/ipc';
 export type { DeepPartial };
 
@@ -134,19 +134,58 @@ export class SettingsStore {
   }
 }
 
+function clamp(val: unknown, min: number, max: number, fallback: number): number {
+  if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(val)));
+}
+
 function mergeSettings(base: AppSettings, patch: DeepPartial<AppSettings>): AppSettings {
+  const allowedThemes: ThemeMode[] = ['system', 'dark', 'light'];
+  const theme = patch.theme && allowedThemes.includes(patch.theme) ? patch.theme : base.theme;
+
+  const allowedLogLevels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
+  const logLevel =
+    patch.data?.logLevel && allowedLogLevels.includes(patch.data.logLevel)
+      ? patch.data.logLevel
+      : base.data.logLevel;
+
   return {
-    theme: patch.theme ?? base.theme,
-    overlay: { ...base.overlay, ...(patch.overlay ?? {}) },
+    theme,
+    overlay: {
+      ...base.overlay,
+      ...(patch.overlay ?? {}),
+      offsetTop: clamp(patch.overlay?.offsetTop, 0, 500, base.overlay.offsetTop),
+      expandOnTurnFinishedMs: clamp(
+        patch.overlay?.expandOnTurnFinishedMs,
+        0,
+        30000,
+        base.overlay.expandOnTurnFinishedMs,
+      ),
+    },
     hotkeys: { ...base.hotkeys, ...(patch.hotkeys ?? {}) },
-    permissions: { ...base.permissions, ...(patch.permissions ?? {}) },
-    sessions: { ...base.sessions, ...(patch.sessions ?? {}) },
+    permissions: {
+      ...base.permissions,
+      timeoutSeconds: clamp(patch.permissions?.timeoutSeconds, 5, 3600, base.permissions.timeoutSeconds),
+    },
+    sessions: {
+      ...base.sessions,
+      idleTimeoutMinutes: clamp(patch.sessions?.idleTimeoutMinutes, 1, 1440, base.sessions.idleTimeoutMinutes),
+    },
     summaries: { ...base.summaries, ...(patch.summaries ?? {}) },
     usage: { ...base.usage, ...(patch.usage ?? {}) },
     mascot: { ...base.mascot, ...(patch.mascot ?? {}) },
     lifecycle: { ...base.lifecycle, ...(patch.lifecycle ?? {}) },
-    data: { ...base.data, ...(patch.data ?? {}) },
-    wsl: { ...base.wsl, ...(patch.wsl ?? {}) },
+    data: {
+      ...base.data,
+      logLevel,
+      retentionDays: clamp(patch.data?.retentionDays, 1, 365, base.data.retentionDays),
+    },
+    wsl: {
+      enabled: Boolean(patch.wsl?.enabled ?? base.wsl.enabled),
+      distro: typeof patch.wsl?.distro === 'string'
+        ? patch.wsl.distro.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64)
+        : base.wsl.distro,
+    },
     featureFlags: { ...base.featureFlags, ...(patch.featureFlags ?? {}) },
   };
 }
