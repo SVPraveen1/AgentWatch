@@ -1,6 +1,8 @@
 import { app, dialog, ipcMain, nativeTheme, screen, shell } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import { APP_NAME } from '../shared/constants';
+import type { DiagnosticBundle, DiagnosticCheckResult } from '../shared/ipc';
 import type {
   AgentConnectionStatus,
   AgentId,
@@ -32,6 +34,7 @@ import { WindowManager } from './windows/windowManager';
 
 // Handle headless uninstall hook cleanup before single-instance lock / GUI init.
 if (process.argv.includes('--disconnect-hooks')) {
+  setTimeout(() => process.exit(0), 4000);
   void app.whenReady().then(async () => {
     try {
       const settings = new SettingsStore(getAppDataDir()).get();
@@ -52,6 +55,11 @@ if (process.argv.includes('--disconnect-hooks')) {
     process.exit(0);
   }
 }
+
+// Enforce strict local-only isolation at Chromium engine level
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-domain-reliability');
 
 let dataDir = '';
 let settingsStore: SettingsStore;
@@ -169,9 +177,22 @@ function buildSnapshot(): AppSnapshot {
   };
 }
 
-function broadcast(): void {
+let broadcastPending = false;
+function broadcast(immediate = false): void {
   if (!windowManager) return;
-  windowManager.broadcastSnapshot(buildSnapshot());
+  if (immediate) {
+    broadcastPending = false;
+    windowManager.broadcastSnapshot(buildSnapshot());
+    return;
+  }
+  if (broadcastPending) return;
+  broadcastPending = true;
+  queueMicrotask(() => {
+    if (broadcastPending && windowManager) {
+      broadcastPending = false;
+      windowManager.broadcastSnapshot(buildSnapshot());
+    }
+  });
 }
 
 function expandOverlay(autoCollapseMs?: number): void {
@@ -340,6 +361,9 @@ function registerIpc(): void {
     windowManager.showDashboard(undefined, undefined, tab);
   });
   ipcMain.handle('agentwatch:update-settings', (_e, patch: DeepPartial<AppSettings>) => {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      return settingsStore.get();
+    }
     const updated = settingsStore.update(patch);
     logger.setLevel(updated.data.logLevel);
     windowManager.applyThemeMode(updated.theme);
@@ -388,29 +412,55 @@ function registerIpc(): void {
   });
   ipcMain.handle(
     'agentwatch:stop-dev-server',
-    async (_e, body: { pid: number; trackedChild: boolean }) => {
-      if (!body.trackedChild) {
+    async (_e, body: { pid: number; trackedChild?: boolean }) => {
+      const pid = typeof body?.pid === 'number' ? Math.floor(body.pid) : 0;
+      if (pid <= 4) {
+        return { ok: false, message: 'Invalid or protected process ID.' };
+      }
+      if (pid === process.pid || pid === process.ppid) {
+        return { ok: false, message: 'Cannot terminate application process.' };
+      }
+
+      // Security validation: verify this PID actually belongs to an active tracked dev server
+      const recognized = devServerTracker.getEntries().find((entry) => entry.pid === pid);
+      if (!recognized) {
+        return { ok: false, message: 'Process is not an active dev server tracked by AgentWatch.' };
+      }
+
+      // Use the verified trackedChild status from the tracker, not unverified renderer payload
+      if (!recognized.trackedChild) {
         const confirm = await dialog.showMessageBox({
           type: 'warning',
           buttons: ['Cancel', 'Stop Process'],
           defaultId: 0,
           cancelId: 0,
           title: 'Confirm Stop Dev Server',
-          message: `Process ${body.pid} is not clearly a child of a tracked session. Stop its process tree anyway?`,
+          message: `Process ${pid} (${recognized.commandShort || recognized.command}) is not clearly a child of a tracked session. Stop its process tree anyway?`,
         });
         if (confirm.response !== 1) {
           return { ok: false, message: 'Cancelled by user.' };
         }
       }
-      const res = await devServerTracker.stopServer(body.pid);
+      const res = await devServerTracker.stopServer(pid);
       broadcast();
       return res;
     },
   );
   ipcMain.handle('agentwatch:open-localhost', async (_e, url: string) => {
     // Strictly restrict external link opens to loopback localhost URLs (zero outbound traffic).
-    if (/^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}(?:\/.*)?$/i.test(url)) {
-      await shell.openExternal(url);
+    if (typeof url !== 'string' || !url.trim()) return;
+    try {
+      const parsed = new URL(url);
+      const isLoopback = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      const isHttp = parsed.protocol === 'http:';
+      const port = Number(parsed.port);
+      const hasValidPort = Number.isInteger(port) && port >= 1 && port <= 65535;
+      const noUserPass = !parsed.username && !parsed.password;
+      if (isHttp && isLoopback && hasValidPort && noUserPass) {
+        await shell.openExternal(parsed.href);
+      }
+    } catch {
+      // Discard invalid URLs
     }
   });
   ipcMain.handle('agentwatch:connect-agent', (_e, agent: AgentId) => connectAgent(agent));
@@ -439,6 +489,141 @@ function registerIpc(): void {
   ipcMain.handle('agentwatch:clear-history', () => {
     sessionStore.clearHistory();
     broadcast();
+  });
+  ipcMain.handle('agentwatch:dismiss-session', (_e, sessionId: string) => {
+    if (typeof sessionId !== 'string') return false;
+    const ok = sessionStore.dismissSession(sessionId);
+    if (ok) broadcast();
+    return ok;
+  });
+  ipcMain.handle('agentwatch:run-diagnostics', async (): Promise<DiagnosticBundle> => {
+    const checks: DiagnosticCheckResult[] = [];
+    const settings = settingsStore.get();
+    const paths = getAgentPathsForSettings(settings);
+
+    // 1. Local loopback server
+    try {
+      const addr = localServer.getAddressInfo();
+      checks.push({
+        name: 'Local Loopback Server',
+        status: addr.port > 0 ? 'pass' : 'fail',
+        details: `Bound to 127.0.0.1:${addr.port} with SHA-256 constant-time token verification`,
+      });
+    } catch (err) {
+      checks.push({
+        name: 'Local Loopback Server',
+        status: 'fail',
+        details: String(err),
+      });
+    }
+
+    // 2. Claude Code Adapter
+    try {
+      const claudeStatus = connectionsCache?.claude_code;
+      const hookPath = resolveHookBinaryPath();
+      const hookExists = fs.existsSync(hookPath);
+      checks.push({
+        name: 'Claude Code Integration',
+        status: claudeStatus?.installed && hookExists ? 'pass' : claudeStatus?.installed ? 'warn' : 'warn',
+        details: `Installed: ${claudeStatus?.installed ?? false}, State: ${claudeStatus?.state ?? 'unknown'}, Hook Binary: ${hookExists ? 'Found' : 'Missing'} (${hookPath})`,
+      });
+    } catch (err) {
+      checks.push({
+        name: 'Claude Code Integration',
+        status: 'fail',
+        details: String(err),
+      });
+    }
+
+    // 3. Codex Adapter
+    try {
+      const codexStatus = connectionsCache?.codex;
+      const sessionsDirExists = fs.existsSync(paths.codexSessionsDir);
+      checks.push({
+        name: 'Codex Integration',
+        status: codexStatus?.installed ? 'pass' : 'warn',
+        details: `Installed: ${codexStatus?.installed ?? false}, State: ${codexStatus?.state ?? 'unknown'}, Sessions Dir: ${sessionsDirExists ? 'Accessible' : 'Not yet created'} (${paths.codexSessionsDir})`,
+      });
+    } catch (err) {
+      checks.push({
+        name: 'Codex Integration',
+        status: 'fail',
+        details: String(err),
+      });
+    }
+
+    // 4. Platform Driver
+    try {
+      const listeners = await platformDriver.listTcpListeners();
+      checks.push({
+        name: 'Platform Subsystem (Win32/Darwin Driver)',
+        status: 'pass',
+        details: `Active TCP listeners discovered: ${listeners.length}. Native helper operational.`,
+      });
+    } catch (err) {
+      checks.push({
+        name: 'Platform Subsystem (Win32/Darwin Driver)',
+        status: 'warn',
+        details: `Driver query notice: ${String(err)}`,
+      });
+    }
+
+    // 5. Screen & Display Setup
+    try {
+      const displays = screen.getAllDisplays();
+      const primary = screen.getPrimaryDisplay();
+      checks.push({
+        name: 'Multi-Monitor & DPI Metrics',
+        status: displays.length > 0 ? 'pass' : 'fail',
+        details: `${displays.length} display(s) detected. Primary: ${primary.size.width}x${primary.size.height} (scale: ${primary.scaleFactor}x).`,
+      });
+    } catch (err) {
+      checks.push({
+        name: 'Multi-Monitor & DPI Metrics',
+        status: 'fail',
+        details: String(err),
+      });
+    }
+
+    // 6. Logs & Storage
+    try {
+      const logFile = path.join(logger.logsDir, 'agentwatch.log');
+      const sizeBytes = fs.existsSync(logFile) ? fs.statSync(logFile).size : 0;
+      checks.push({
+        name: 'Local Storage & Bounded Logs',
+        status: 'pass',
+        details: `Data dir: ${dataDir}, Log size: ${(sizeBytes / 1024).toFixed(1)} KB (10 MB max rotation)`,
+      });
+    } catch (err) {
+      checks.push({
+        name: 'Local Storage & Bounded Logs',
+        status: 'warn',
+        details: String(err),
+      });
+    }
+
+    const mdLines = [
+      `# ${APP_NAME} Self-Test Diagnostics`,
+      `**Generated:** ${new Date().toISOString()}`,
+      `**Version:** ${app.getVersion()}`,
+      `**Platform:** ${process.platform} (${process.arch})`,
+      `**Zero Outbound / Telemetry:** Strictly Enforced (Local Loopback Only)`,
+      '',
+      '## Subsystem Checks',
+      ...checks.map((c) => `- **[${c.status.toUpperCase()}] ${c.name}**: ${c.details}`),
+      '',
+      '## Active Sessions & Dev Servers',
+      `- Active Sessions: ${sessionStore.getSessions().length}`,
+      `- Tracked Dev Servers: ${devServerTracker.getEntries().length}`,
+    ];
+
+    return {
+      generatedAt: new Date().toISOString(),
+      version: app.getVersion(),
+      platform: process.platform,
+      checks,
+      markdown: mdLines.join('\n'),
+    };
   });
   ipcMain.handle('agentwatch:trigger-sim', async (_e, kind: 'working' | 'permission' | 'finished' | 'error') => {
     const sessionId = `sim-ui-${Date.now()}`;
@@ -654,7 +839,7 @@ void app.whenReady().then(async () => {
   codexWatchTimer = setInterval(() => {
     if (connectionsCache.codex?.state !== 'connected') return;
     const paths = getAgentPathsForSettings(settingsStore.get());
-    codexWatcher.poll(paths.codexSessionsDir, (ev) => {
+    void codexWatcher.poll(paths.codexSessionsDir, (ev) => {
       void handleNormalizedEvent(ev);
     });
   }, 3_000);

@@ -22,6 +22,7 @@ const api: AgentWatchAPI = {
     ipcRenderer.invoke('agentwatch:resolve-permission', { requestId, decision, alwaysAllow }),
   revokeRule: (ruleId) => ipcRenderer.invoke('agentwatch:revoke-rule', ruleId),
   clearRules: () => ipcRenderer.invoke('agentwatch:clear-rules'),
+  dismissSession: (sessionId) => ipcRenderer.invoke('agentwatch:dismiss-session', sessionId),
   openTerminal: (sessionId) => ipcRenderer.invoke('agentwatch:open-terminal', sessionId),
   stopDevServer: (pid, trackedChild) =>
     ipcRenderer.invoke('agentwatch:stop-dev-server', { pid, trackedChild }),
@@ -30,6 +31,7 @@ const api: AgentWatchAPI = {
   refreshUsageAndAnalytics: () => ipcRenderer.invoke('agentwatch:refresh-analytics'),
   clearHistory: () => ipcRenderer.invoke('agentwatch:clear-history'),
   openLogsFolder: () => ipcRenderer.invoke('agentwatch:open-logs-folder'),
+  runDiagnostics: () => ipcRenderer.invoke('agentwatch:run-diagnostics'),
   getDisplays: () => ipcRenderer.invoke('agentwatch:get-displays'),
   getCursorPosition: () => ipcRenderer.invoke('agentwatch:get-cursor'),
   triggerSimEvent: (kind) => ipcRenderer.invoke('agentwatch:trigger-sim', kind),

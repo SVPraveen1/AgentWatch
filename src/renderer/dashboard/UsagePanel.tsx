@@ -243,7 +243,7 @@ export const UsagePanel: React.FC<{ snapshot: AppSnapshot | null }> = ({ snapsho
             {analytics?.rangeStart} to {analytics?.rangeEnd}
           </span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(26px, 1fr))', gap: 4 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(28px, 1fr))', gap: 5 }}>
           {(analytics?.dailyBuckets ?? []).map((b) => {
             const level = getHeatBucket(b.totalTokens, maxDayTokens);
             return (
@@ -251,15 +251,17 @@ export const UsagePanel: React.FC<{ snapshot: AppSnapshot | null }> = ({ snapsho
                 key={b.date}
                 title={`${b.date}: ${formatTokens(b.totalTokens)} tokens`}
                 style={{
-                  height: 26,
-                  borderRadius: 4,
+                  height: 28,
+                  borderRadius: 'var(--radius-sm)',
                   background: `var(--heat-${level})`,
                   border: '1px solid var(--border-subtle)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 9.5,
-                  color: level >= 3 ? 'var(--text-on-accent)' : 'var(--text-muted)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-mono)',
+                  color: level >= 2 ? '#ffffff' : 'var(--text-secondary)',
                 }}
               >
                 {b.date.slice(-2)}

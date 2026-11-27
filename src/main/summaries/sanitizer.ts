@@ -3,6 +3,8 @@ import { SUMMARY_MAX_CHARS } from '../../shared/constants';
 const SECRET_PATTERNS: RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{10,}\b/g,
   /\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{16,}\b/g,
+  /\bAIzaSy[A-Za-z0-9_-]{33}\b/g,
+  /\bhf_[A-Za-z0-9]{34,}\b/g,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
@@ -11,6 +13,8 @@ const SECRET_PATTERNS: RegExp[] = [
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\b/g,
   /(?<=Bearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi,
   /(?<=(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{12,}/gi,
+  /(?<=(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqps?):\/\/[^:\s]+:)[^@\s]+(?=@)/gi,
+  /-----BEGIN (?:[A-Z0-9_-]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9_-]+ )?PRIVATE KEY-----/gi,
   /\b[0-9a-fA-F]{32,}\b/g,
 ];
 

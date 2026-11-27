@@ -69,4 +69,48 @@ describe('M6 DevServerTracker', () => {
     expect(killedPid).toBe(300);
     expect(await tracker.poll(sessions, 44444)).toHaveLength(0);
   });
+
+  it('caches command lines across poll iterations and avoids redundant driver queries', async () => {
+    let callCount = 0;
+    const mockDriver: PlatformDriver = {
+      listProcesses: async () => [
+        { pid: 100, ppid: 1, exeName: 'claude.exe' },
+        { pid: 200, ppid: 100, exeName: 'node.exe' },
+      ],
+      listTcpListeners: async () => [{ pid: 200, port: 3000, host: '127.0.0.1' }],
+      getCommandLinesForPids: async (_pids) => {
+        callCount++;
+        return { 200: 'node server.js' };
+      },
+      resolveTerminalRef: async () => null,
+      focusTerminal: async () => ({ ok: false }),
+      isForegroundFullscreen: async () => false,
+      killProcessTree: async () => ({ ok: true }),
+    };
+
+    const sessions: SessionRecord[] = [
+      {
+        id: 's1',
+        agent: 'claude_code',
+        cwd: '/repo',
+        folderName: 'repo',
+        title: 'Session',
+        state: 'working',
+        startedAt: 1000,
+        lastEventAt: 2000,
+        summary: '',
+        pid: 100,
+      },
+    ];
+
+    const tracker = new DevServerTracker(mockDriver);
+    // First poll -> queries driver
+    await tracker.poll(sessions);
+    expect(callCount).toBe(1);
+
+    // Second poll with same alive PID -> hits memory cache, callCount stays 1
+    const second = await tracker.poll(sessions);
+    expect(callCount).toBe(1);
+    expect(second[0].command).toBe('node server.js');
+  });
 });

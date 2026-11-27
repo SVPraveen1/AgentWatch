@@ -5,6 +5,7 @@
   "description": "Windows Agent Notch desktop app watching Claude Code and Codex sessions",
   "main": "dist-electron/main/index.js",
   "scripts": {
+    "start": "electron .",
     "dev": "vite",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",

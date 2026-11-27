@@ -13,7 +13,9 @@ import { AppLogger } from '../../src/main/core/logger';
 import { SecureSecretStore } from '../../src/main/core/secureStore';
 import { SessionStore } from '../../src/main/core/sessionStore';
 import { PermissionManager } from '../../src/main/permissions/permissionManager';
-import { RuleStore } from '../../src/main/permissions/ruleMatcher';
+import { checkDestructiveCommand, RuleStore } from '../../src/main/permissions/ruleMatcher';
+import { redactSecrets } from '../../src/main/summaries/sanitizer';
+import { SettingsStore } from '../../src/main/core/settingsStore';
 import { SUMMARY_CONTEXT_INSTRUCTION, SummaryPipeline } from '../../src/main/summaries/summaryPipeline';
 import { computeOverlayBounds } from '../../src/main/windows/overlayGeometry';
 
@@ -245,5 +247,123 @@ describe('M9 Hardening, security, spaces-in-path hook E2E, WSL, and multi-monito
     expect(saved?.state).toBe('done');
     expect(saved?.summary).toContain('[REDACTED]');
     expect(saved?.summary).not.toContain('sk-ant-');
+  });
+
+  it('detects advanced destructive command patterns, split flags, and subshell wrappers', () => {
+    // Split flags
+    expect(checkDestructiveCommand('Bash', 'rm -r /some/dir -f').destructive).toBe(true);
+    expect(checkDestructiveCommand('Bash', 'rm -f /some/dir -r').destructive).toBe(true);
+    expect(checkDestructiveCommand('Bash', 'rm -R /some/dir').destructive).toBe(true);
+    expect(checkDestructiveCommand('Bash', 'rm --recursive /dir --force').destructive).toBe(true);
+
+    // PowerShell aliases and flags
+    expect(checkDestructiveCommand('powershell', 'ri -r -fo C:\\Temp').destructive).toBe(true);
+    expect(checkDestructiveCommand('powershell', 'Remove-Item -Recurse C:\\Temp').destructive).toBe(true);
+
+    // Subshells and find
+    expect(checkDestructiveCommand('Bash', 'bash -c "rm -rf /"').destructive).toBe(true);
+    expect(checkDestructiveCommand('Bash', 'find . -name "*.log" -delete').destructive).toBe(true);
+
+    // Dangerous git operations
+    expect(checkDestructiveCommand('Bash', 'git checkout -f main').destructive).toBe(true);
+    expect(checkDestructiveCommand('Bash', 'git branch -D feature').destructive).toBe(true);
+
+    // Secret and auth file modifications
+    expect(checkDestructiveCommand('Bash', 'echo "KEY=1" > .env').destructive).toBe(true);
+    expect(checkDestructiveCommand('Bash', 'cat key.pub >> ~/.ssh/authorized_keys').destructive).toBe(true);
+    expect(checkDestructiveCommand('Edit', 'Edit ~/.ssh/id_rsa').destructive).toBe(true);
+
+    // Benign commands
+    expect(checkDestructiveCommand('Bash', 'pnpm test').destructive).toBe(false);
+    expect(checkDestructiveCommand('Bash', 'git status').destructive).toBe(false);
+    expect(checkDestructiveCommand('Bash', 'npm run build').destructive).toBe(false);
+  });
+
+  it('redacts expanded secret types including Gemini, HuggingFace, private keys, and DB passwords', () => {
+    const raw = [
+      'Gemini key: AIzaSyD9x8K1l2M3n4O5p6Q7r8S9t0U1v2W3x4Y',
+      'HF token: hf_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789',
+      'Database: postgres://app_user:super_secret_pw123@db.prod.internal:5432/main',
+      'Key: -----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0...\n-----END RSA PRIVATE KEY-----',
+    ].join('\n');
+
+    const redacted = redactSecrets(raw);
+    expect(redacted).not.toContain('AIzaSyD9x8K1l2M3n4O5p6Q7r8S9t0U1v2W3x4Y');
+    expect(redacted).not.toContain('hf_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789');
+    expect(redacted).not.toContain('super_secret_pw123');
+    expect(redacted).not.toContain('MIIEowIBAAKCAQEA0');
+    expect(redacted).toContain('postgres://app_user:[REDACTED]@db.prod.internal:5432/main');
+  });
+
+  it('sanitizes and bounds settings updates to prevent corruption', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-settings-sec-'));
+    dirs.push(tmp);
+    const store = new SettingsStore(tmp);
+
+    // Attempt invalid/extreme values
+    store.update({
+      data: { retentionDays: -999 as unknown as number, logLevel: 'malicious' as unknown as any },
+      permissions: { timeoutSeconds: 9999999 },
+      overlay: { offsetTop: 9999 },
+      wsl: { distro: 'Ubuntu; rm -rf /' },
+    });
+
+    const current = store.get();
+    expect(current.data.retentionDays).toBe(1); // Clamped to min 1
+    expect(current.data.logLevel).toBe('info'); // Fallback to safe default
+    expect(current.permissions.timeoutSeconds).toBe(3600); // Clamped to max 3600
+    expect(current.overlay.offsetTop).toBe(500); // Clamped to max 500
+    expect(current.wsl.distro).toBe('Ubunturm-rf'); // Sanitized, no shell metacharacters
+  });
+
+  it('allows manual dismissal of active and ended sessions', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-dismiss-'));
+    dirs.push(tmp);
+    const store = new SessionStore(tmp);
+
+    store.applyEvent({
+      id: 'ev-1',
+      agent: 'claude_code',
+      sessionId: 'sess-to-dismiss',
+      timestamp: Date.now(),
+      cwd: '/workspace/test',
+      folderName: 'test',
+      title: 'Session to dismiss',
+      type: 'session_started',
+    });
+
+    expect(store.getSession('sess-to-dismiss')).toBeDefined();
+    expect(store.getSessions().length).toBe(1);
+
+    const dismissed = store.dismissSession('sess-to-dismiss');
+    expect(dismissed).toBe(true);
+    expect(store.getSession('sess-to-dismiss')).toBeUndefined();
+    expect(store.getSessions().length).toBe(0);
+
+    // Dismissing nonexistent session returns false cleanly
+    expect(store.dismissSession('nonexistent')).toBe(false);
+  });
+
+  it('rotates log file when size threshold is reached', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-log-rot-'));
+    dirs.push(tmp);
+    const logger = new AppLogger(tmp, 'info');
+
+    const logFile = path.join(logger.logsDir, 'agentwatch.log');
+    const backupFile = path.join(logger.logsDir, 'agentwatch.log.1');
+
+    // Create a 10MB dummy log file to trigger rotation on next write
+    const bigChunk = Buffer.alloc(10 * 1024 * 1024, 'a');
+    fs.writeFileSync(logFile, bigChunk);
+
+    expect(fs.existsSync(backupFile)).toBe(false);
+    expect(fs.statSync(logFile).size).toBeGreaterThanOrEqual(10 * 1024 * 1024);
+
+    // Write next log line
+    logger.info('test', 'Hello rotation');
+
+    // Now backupFile should exist and logFile should be small
+    expect(fs.existsSync(backupFile)).toBe(true);
+    expect(fs.statSync(logFile).size).toBeLessThan(1024);
   });
 });

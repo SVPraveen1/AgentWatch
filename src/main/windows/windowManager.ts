@@ -6,8 +6,10 @@ import {
   nativeImage,
   nativeTheme,
   screen,
+  session,
 } from 'electron';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { APP_NAME } from '../../shared/constants';
 import type { AgentId, AppSettings, AppSnapshot, ThemeMode } from '../../shared/types';
 import type { AppLogger } from '../core/logger';
@@ -38,6 +40,8 @@ export class WindowManager {
   private overlayManuallyHidden = false;
   private trayStatus: TrayStatus = 'idle';
   private overlayDimensions = { width: COLLAPSED_WIDTH, height: COLLAPSED_HEIGHT };
+  private devServerUrl?: string;
+  private hardeningInstalled = false;
 
   constructor(
     private readonly logger: AppLogger,
@@ -45,6 +49,8 @@ export class WindowManager {
   ) {}
 
   init(settings: AppSettings, isDev: boolean, devServerUrl?: string): void {
+    this.devServerUrl = devServerUrl;
+    this.installHardening();
     this.applyThemeMode(settings.theme);
     this.createOverlayWindow(settings, isDev, devServerUrl);
     this.createTray(settings);
@@ -61,6 +67,73 @@ export class WindowManager {
     screen.on('display-removed', () => {
       this.positionOverlay(this.callbacks.getSnapshot().settings);
     });
+  }
+
+  /**
+   * Defense in depth for the renderer process. Dashboard + overlay only ever talk to main
+   * through the contextBridge, so: deny every new window, deny navigation outside our own
+   * renderer bundle, deny <webview>, and deny all Chromium permission requests. Installed once
+   * and covers every webContents, including windows created later.
+   */
+  private installHardening(): void {
+    if (this.hardeningInstalled) return;
+    this.hardeningInstalled = true;
+
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
+      callback(false);
+    });
+    session.defaultSession.setPermissionCheckHandler(() => false);
+
+    app.on('web-contents-created', (_event, contents) => {
+      contents.setWindowOpenHandler(({ url }) => {
+        this.logger.warn('security', 'Blocked window.open() from renderer', { url });
+        return { action: 'deny' };
+      });
+
+      contents.on('will-navigate', (event, url) => {
+        if (!this.isTrustedNavigationUrl(url)) {
+          event.preventDefault();
+          this.logger.warn('security', 'Blocked renderer navigation', { url });
+        }
+      });
+
+      contents.on('will-attach-webview', (event) => {
+        event.preventDefault();
+        this.logger.warn('security', 'Blocked webview attachment from renderer');
+      });
+
+      contents.on('render-process-gone', (_event, details) => {
+        this.logger.error('security', 'Renderer process gone', {
+          reason: details.reason,
+          exitCode: details.exitCode,
+        });
+      });
+
+      contents.on('preload-error', (_event, preloadPath, error) => {
+        this.logger.error('security', 'Preload script failed', {
+          preloadPath,
+          error: String(error),
+        });
+      });
+    });
+  }
+
+  /**
+   * True when `target` is one of our own renderer documents: the Vite dev server (dev only)
+   * or a file inside dist-renderer (packaged). Everything else is untrusted.
+   */
+  private isTrustedNavigationUrl(target: string): boolean {
+    if (this.devServerUrl && target.startsWith(this.devServerUrl)) return true;
+    try {
+      const url = new URL(target);
+      if (url.protocol !== 'file:') return false;
+      const filePath = fileURLToPath(url);
+      const rendererDir = path.resolve(__dirname, '..', '..', 'dist-renderer');
+      const relative = path.relative(rendererDir, filePath);
+      return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+    } catch {
+      return false;
+    }
   }
 
   applyThemeMode(theme: ThemeMode): void {
@@ -116,7 +189,9 @@ export class WindowManager {
         preload: preloadPath,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
+        // Renderer gets no Node primitives at all; the preload only needs contextBridge/ipcRenderer,
+        // both of which are exposed to sandboxed preloads.
+        sandbox: true,
       },
     });
 
@@ -127,7 +202,7 @@ export class WindowManager {
     if (isDev && devServerUrl) {
       void this.overlayWin.loadURL(`${devServerUrl}/overlay.html`);
     } else {
-      const htmlPath = path.join(__dirname, '..', '..', 'dist-renderer', 'overlay.html');
+      const htmlPath = path.join(app.getAppPath(), 'dist-renderer', 'overlay.html');
       void this.overlayWin.loadFile(htmlPath);
     }
 
@@ -184,7 +259,7 @@ export class WindowManager {
     if (resolvedIsDev && resolvedDevUrl) {
       void this.dashboardWin.loadURL(`${resolvedDevUrl}/dashboard.html${hash}`);
     } else {
-      const htmlPath = path.join(__dirname, '..', '..', 'dist-renderer', 'dashboard.html');
+      const htmlPath = path.join(app.getAppPath(), 'dist-renderer', 'dashboard.html');
       void this.dashboardWin.loadFile(htmlPath, initialTab ? { hash: initialTab } : undefined);
     }
 

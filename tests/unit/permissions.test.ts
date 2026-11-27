@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AppLogger } from '../../src/main/core/logger';
+import { SessionStore } from '../../src/main/core/sessionStore';
 import { detectHotkeyConflicts } from '../../src/main/permissions/hotkeyManager';
 import { PermissionManager } from '../../src/main/permissions/permissionManager';
 import {
@@ -153,5 +154,72 @@ describe('M2 Permissions, Rules & Safety Guard', () => {
     expect(conflicts.some((c) => c.includes('same shortcut'))).toBe(true);
     expect(conflicts.some((c) => c.includes('Redo'))).toBe(true);
     expect(conflicts.some((c) => c.includes('New File'))).toBe(true);
+  });
+
+  it('manages concurrent parallel permissions on a single session without state loss', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aw-multi-perm-'));
+    dirs.push(tmp);
+    const store = new SessionStore(tmp);
+
+    store.applyEvent({
+      id: 'e1',
+      agent: 'claude_code',
+      sessionId: 's-parallel',
+      timestamp: 1000,
+      type: 'session_started',
+      cwd: '/workspace',
+      folderName: 'workspace',
+    });
+
+    const perm1 = {
+      requestId: 'req-tool-1',
+      sessionId: 's-parallel',
+      agent: 'claude_code' as const,
+      toolName: 'ReadFile',
+      commandOrAction: 'ReadFile src/a.ts',
+      rawInput: {},
+      cwd: '/workspace',
+      folderName: 'workspace',
+      requestedAt: 1100,
+      expiresAt: 2000,
+      readOnlyInTerminal: false,
+    };
+
+    const perm2 = {
+      requestId: 'req-tool-2',
+      sessionId: 's-parallel',
+      agent: 'claude_code' as const,
+      toolName: 'ReadFile',
+      commandOrAction: 'ReadFile src/b.ts',
+      rawInput: {},
+      cwd: '/workspace',
+      folderName: 'workspace',
+      requestedAt: 1200,
+      expiresAt: 2000,
+      readOnlyInTerminal: false,
+    };
+
+    // Attach both parallel tool permissions
+    store.attachPendingPermission('s-parallel', perm1);
+    store.attachPendingPermission('s-parallel', perm2);
+
+    let session = store.getSession('s-parallel');
+    expect(session?.state).toBe('needs_you');
+    expect(session?.pendingPermissions).toHaveLength(2);
+    expect(session?.pendingPermission?.requestId).toBe('req-tool-1');
+
+    // Resolve first permission -> second permission remains active and state stays needs_you
+    store.clearPendingPermission('s-parallel', 'req-tool-1', 'working');
+    session = store.getSession('s-parallel');
+    expect(session?.state).toBe('needs_you');
+    expect(session?.pendingPermissions).toHaveLength(1);
+    expect(session?.pendingPermission?.requestId).toBe('req-tool-2');
+
+    // Resolve second permission -> state transitions to working
+    store.clearPendingPermission('s-parallel', 'req-tool-2', 'working');
+    session = store.getSession('s-parallel');
+    expect(session?.state).toBe('working');
+    expect(session?.pendingPermission).toBeUndefined();
+    expect(session?.pendingPermissions).toBeUndefined();
   });
 });

@@ -18,10 +18,12 @@ var (
 	kernel32                       = syscall.NewLazyDLL("kernel32.dll")
 	user32                         = syscall.NewLazyDLL("user32.dll")
 	iphlpapi                       = syscall.NewLazyDLL("iphlpapi.dll")
+	ntdll                          = syscall.NewLazyDLL("ntdll.dll")
 	procCreateToolhelp32Snapshot   = kernel32.NewProc("CreateToolhelp32Snapshot")
 	procProcess32FirstW            = kernel32.NewProc("Process32FirstW")
 	procProcess32NextW             = kernel32.NewProc("Process32NextW")
 	procGetCurrentThreadId         = kernel32.NewProc("GetCurrentThreadId")
+	procOpenProcess                = kernel32.NewProc("OpenProcess")
 	procEnumWindows                = user32.NewProc("EnumWindows")
 	procGetWindowThreadProcessId   = user32.NewProc("GetWindowThreadProcessId")
 	procIsWindow                   = user32.NewProc("IsWindow")
@@ -40,19 +42,39 @@ var (
 	procMonitorFromWindow          = user32.NewProc("MonitorFromWindow")
 	procGetMonitorInfoW            = user32.NewProc("GetMonitorInfoW")
 	procGetExtendedTcpTable        = iphlpapi.NewProc("GetExtendedTcpTable")
+	procNtQueryInformationProcess  = ntdll.NewProc("NtQueryInformationProcess")
+	procSetProcessDpiAwarenessCtx  = user32.NewProc("SetProcessDpiAwarenessContext")
+	procSetProcessDPIAware         = user32.NewProc("SetProcessDPIAware")
 )
 
+func init() {
+	// Enable Per-Monitor V2 DPI awareness (-4) on Windows 10/11, falling back to legacy DPI aware
+	if procSetProcessDpiAwarenessCtx.Find() == nil {
+		_, _, _ = procSetProcessDpiAwarenessCtx.Call(uintptr(^uintptr(3)))
+	} else if procSetProcessDPIAware.Find() == nil {
+		_, _, _ = procSetProcessDPIAware.Call()
+	}
+}
+
 const (
-	th32csSnapProcess      = 0x00000002
-	maxPath                = 260
-	swRestore              = 9
-	swShow                 = 5
-	afInet                 = 2
-	afInet6                = 23
-	tcpTableOwnerPidListen = 3
-	tcpStateListen         = 2
-	monitorDefaultNearest  = 2
+	th32csSnapProcess              = 0x00000002
+	maxPath                        = 260
+	swRestore                      = 9
+	swShow                         = 5
+	afInet                         = 2
+	afInet6                        = 23
+	tcpTableOwnerPidListen         = 3
+	tcpStateListen                 = 2
+	monitorDefaultNearest          = 2
+	processCommandLineInformation = 60
+	processQueryLimitedInformation = 0x1000
 )
+
+type unicodeString struct {
+	Length        uint16
+	MaximumLength uint16
+	Buffer        *uint16
+}
 
 type processEntry32W struct {
 	dwSize              uint32
@@ -419,9 +441,46 @@ func isForegroundFullscreen() bool {
 }
 
 func killProcessTree(pid uint32) error {
-	if pid == 0 {
-		return errors.New("invalid pid 0")
+	if pid <= 4 {
+		return errors.New("invalid or protected system pid")
 	}
 	cmd := exec.Command("taskkill", "/PID", strconv.FormatUint(uint64(pid), 10), "/T", "/F")
 	return cmd.Run()
+}
+
+func getCommandLineForPid(pid uint32) string {
+	if pid <= 4 {
+		return ""
+	}
+	h, _, _ := procOpenProcess.Call(processQueryLimitedInformation, 0, uintptr(pid))
+	if h == 0 {
+		return ""
+	}
+	defer syscall.CloseHandle(syscall.Handle(h))
+
+	var needed uint32
+	procNtQueryInformationProcess.Call(h, processCommandLineInformation, 0, 0, uintptr(unsafe.Pointer(&needed)))
+	if needed == 0 {
+		return ""
+	}
+
+	buf := make([]byte, needed)
+	r, _, _ := procNtQueryInformationProcess.Call(
+		h,
+		processCommandLineInformation,
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(needed),
+		uintptr(unsafe.Pointer(&needed)),
+	)
+	if r != 0 || len(buf) <= int(unsafe.Sizeof(unicodeString{})) {
+		return ""
+	}
+
+	us := (*unicodeString)(unsafe.Pointer(&buf[0]))
+	if us.Length == 0 || us.Buffer == nil {
+		return ""
+	}
+	charCount := int(us.Length / 2)
+	chars := unsafe.Slice(us.Buffer, charCount)
+	return syscall.UTF16ToString(chars)
 }

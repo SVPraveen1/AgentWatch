@@ -79,9 +79,37 @@ export class Win32PlatformDriver implements PlatformDriver {
   }
 
   async getCommandLinesForPids(pids: number[]): Promise<Record<number, string>> {
-    const unique = Array.from(new Set(pids.filter((p) => p > 0)));
+    const unique = Array.from(new Set(pids.filter((p) => p > 4)));
     if (unique.length === 0) return {};
-    const filter = unique.map((p) => `ProcessId=${p}`).join(' OR ');
+    const out: Record<number, string> = {};
+    const missing: number[] = [];
+    try {
+      const res = await this.runHelper<Record<string, string>>([
+        'command-lines',
+        '--pids',
+        unique.join(','),
+      ]);
+      for (const p of unique) {
+        if (res && res[String(p)]) {
+          out[p] = res[String(p)];
+        } else {
+          missing.push(p);
+        }
+      }
+    } catch {
+      missing.push(...unique);
+    }
+
+    if (missing.length > 0) {
+      const fallback = await this.fallbackPowerShellCommandLines(missing);
+      Object.assign(out, fallback);
+    }
+    return out;
+  }
+
+  private async fallbackPowerShellCommandLines(pids: number[]): Promise<Record<number, string>> {
+    if (pids.length === 0) return {};
+    const filter = pids.map((p) => `ProcessId=${p}`).join(' OR ');
     const psCmd = `Get-CimInstance Win32_Process -Filter "${filter}" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress`;
     try {
       const { stdout } = await execFileAsync(

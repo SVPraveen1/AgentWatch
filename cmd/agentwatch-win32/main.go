@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 type ProcessInfo struct {
@@ -65,6 +67,20 @@ func main() {
 			os.Exit(1)
 		}
 		writeJSON(listeners)
+	case "command-lines":
+		fs := flag.NewFlagSet("command-lines", flag.ExitOnError)
+		pidsStr := fs.String("pids", "", "comma-separated pids")
+		_ = fs.Parse(args)
+		res := make(map[string]string)
+		for _, s := range strings.Split(*pidsStr, ",") {
+			s = strings.TrimSpace(s)
+			if p, err := strconv.ParseUint(s, 10, 32); err == nil && p > 4 {
+				if cmd := getCommandLineForPid(uint32(p)); cmd != "" {
+					res[s] = cmd
+				}
+			}
+		}
+		writeJSON(res)
 	case "resolve-terminal":
 		fs := flag.NewFlagSet("resolve-terminal", flag.ExitOnError)
 		pid := fs.Uint("pid", 0, "starting pid")
@@ -82,6 +98,10 @@ func main() {
 		fs := flag.NewFlagSet("kill-tree", flag.ExitOnError)
 		pid := fs.Uint("pid", 0, "root pid")
 		_ = fs.Parse(args)
+		if *pid <= 4 {
+			writeJSON(map[string]any{"ok": false, "error": "invalid or protected pid"})
+			os.Exit(1)
+		}
 		if err := killProcessTree(uint32(*pid)); err != nil {
 			writeJSON(map[string]any{"ok": false, "error": err.Error()})
 			os.Exit(1)

@@ -15,6 +15,20 @@ export type DeepPartial<T> = {
       : T[K];
 };
 
+export interface DiagnosticCheckResult {
+  name: string;
+  status: 'pass' | 'warn' | 'fail';
+  details: string;
+}
+
+export interface DiagnosticBundle {
+  generatedAt: string;
+  version: string;
+  platform: string;
+  checks: DiagnosticCheckResult[];
+  markdown: string;
+}
+
 export interface AgentWatchAPI {
   getSnapshot: () => Promise<AppSnapshot>;
   onSnapshot: (listener: (snapshot: AppSnapshot) => void) => () => void;
@@ -33,6 +47,7 @@ export interface AgentWatchAPI {
   ) => Promise<void>;
   revokeRule: (ruleId: string) => Promise<void>;
   clearRules: () => Promise<void>;
+  dismissSession: (sessionId: string) => Promise<boolean>;
   openTerminal: (sessionId: string) => Promise<{ ok: boolean; message?: string }>;
   stopDevServer: (pid: number, trackedChild: boolean) => Promise<{ ok: boolean; message?: string }>;
   openExternalLocalhost: (url: string) => Promise<void>;
@@ -40,6 +55,7 @@ export interface AgentWatchAPI {
   refreshUsageAndAnalytics: () => Promise<void>;
   clearHistory: () => Promise<void>;
   openLogsFolder: () => Promise<void>;
+  runDiagnostics: () => Promise<DiagnosticBundle>;
   getDisplays: () => Promise<
     Array<{
       id: number;

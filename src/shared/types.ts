@@ -52,6 +52,7 @@ export interface SessionRecord {
   lastEventAt: number;
   summary: string;
   pendingPermission?: PendingPermission;
+  pendingPermissions?: PendingPermission[];
   pid?: number;
   terminalWindowRef?: TerminalWindowRef;
   transcriptPath?: string;
