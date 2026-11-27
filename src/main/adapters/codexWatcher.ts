@@ -17,63 +17,72 @@ interface FileCursor {
 export class CodexRolloutWatcher {
   private cursors = new Map<string, FileCursor>();
   private initialized = false;
+  private isPolling = false;
 
-  poll(sessionsDir: string, onEvent: (event: NormalizedEvent) => void): void {
-    if (!fs.existsSync(sessionsDir)) return;
-    const files = findRecentRolloutFiles(sessionsDir, 20);
-    const isInitialScan = !this.initialized;
-    this.initialized = true;
+  async poll(sessionsDir: string, onEvent: (event: NormalizedEvent) => void): Promise<void> {
+    if (this.isPolling) return;
+    this.isPolling = true;
+    try {
+      if (!fs.existsSync(sessionsDir)) return;
+      const files = await findRecentRolloutFilesAsync(sessionsDir, 20);
+      const isInitialScan = !this.initialized;
+      this.initialized = true;
 
-    for (const filePath of files) {
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(filePath);
-      } catch {
-        continue;
-      }
-
-      let cursor = this.cursors.get(filePath);
-      if (!cursor) {
-        cursor = {
-          // On initial launch, fast-forward to EOF so historical sessions don't spam live alerts.
-          offset: isInitialScan ? stat.size : 0,
-        };
-        this.cursors.set(filePath, cursor);
-      }
-
-      if (stat.size <= cursor.offset) {
-        if (stat.size < cursor.offset) cursor.offset = 0;
-        continue;
-      }
-
-      const len = Math.min(stat.size - cursor.offset, 512 * 1024);
-      const buf = Buffer.alloc(len);
-      let fd: number | undefined;
-      try {
-        fd = fs.openSync(filePath, 'r');
-        fs.readSync(fd, buf, 0, len, cursor.offset);
-      } catch {
-        continue;
-      } finally {
-        if (fd !== undefined) fs.closeSync(fd);
-      }
-
-      const chunk = buf.toString('utf8');
-      const lastNewline = chunk.lastIndexOf('\n');
-      if (lastNewline === -1) continue;
-      cursor.offset += Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf8');
-
-      const lines = chunk.slice(0, lastNewline).split(/\r?\n/);
-      for (const line of lines) {
-        if (!line.trim()) continue;
+      for (const filePath of files) {
+        let stat: fs.Stats;
         try {
-          const parsed = JSON.parse(line) as Record<string, unknown>;
-          const ev = this.parseRolloutLine(parsed, filePath, cursor);
-          if (ev) onEvent(ev);
+          stat = await fs.promises.stat(filePath);
         } catch {
-          // Ignore partial or malformed lines.
+          continue;
+        }
+
+        let cursor = this.cursors.get(filePath);
+        if (!cursor) {
+          cursor = {
+            // On initial launch, fast-forward to EOF so historical sessions don't spam live alerts.
+            offset: isInitialScan ? stat.size : 0,
+          };
+          this.cursors.set(filePath, cursor);
+        }
+
+        if (stat.size <= cursor.offset) {
+          if (stat.size < cursor.offset) cursor.offset = 0;
+          continue;
+        }
+
+        const len = Math.min(stat.size - cursor.offset, 512 * 1024);
+        const buf = Buffer.alloc(len);
+        let handle: fs.promises.FileHandle | undefined;
+        try {
+          handle = await fs.promises.open(filePath, 'r');
+          await handle.read(buf, 0, len, cursor.offset);
+        } catch {
+          continue;
+        } finally {
+          if (handle !== undefined) {
+            await handle.close();
+          }
+        }
+
+        const chunk = buf.toString('utf8');
+        const lastNewline = chunk.lastIndexOf('\n');
+        if (lastNewline === -1) continue;
+        cursor.offset += Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf8');
+
+        const lines = chunk.slice(0, lastNewline).split(/\r?\n/);
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line) as Record<string, unknown>;
+            const ev = this.parseRolloutLine(parsed, filePath, cursor);
+            if (ev) onEvent(ev);
+          } catch {
+            // Ignore partial or malformed lines.
+          }
         }
       }
+    } finally {
+      this.isPolling = false;
     }
   }
 
@@ -146,14 +155,14 @@ export class CodexRolloutWatcher {
   }
 }
 
-function findRecentRolloutFiles(rootDir: string, limit: number): string[] {
+async function findRecentRolloutFilesAsync(rootDir: string, limit: number): Promise<string[]> {
   const results: Array<{ file: string; mtimeMs: number }> = [];
   const stack = [rootDir];
   while (stack.length > 0) {
     const dir = stack.pop()!;
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -163,7 +172,7 @@ function findRecentRolloutFiles(rootDir: string, limit: number): string[] {
         stack.push(full);
       } else if (ent.isFile() && ent.name.startsWith('rollout-') && ent.name.endsWith('.jsonl')) {
         try {
-          const st = fs.statSync(full);
+          const st = await fs.promises.stat(full);
           results.push({ file: full, mtimeMs: st.mtimeMs });
         } catch {
           // Ignore vanished files.

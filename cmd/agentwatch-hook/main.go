@@ -92,11 +92,26 @@ func readStdinNonBlocking(maxBytes int64) []byte {
 	if (stat.Mode() & os.ModeCharDevice) != 0 {
 		return nil
 	}
-	data, err := io.ReadAll(io.LimitReader(os.Stdin, maxBytes))
-	if err != nil {
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan readResult, 1)
+	go func() {
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, maxBytes))
+		ch <- readResult{data: data, err: err}
+	}()
+
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			return nil
+		}
+		return bytes.TrimSpace(res.data)
+	case <-time.After(150 * time.Millisecond):
+		// Non-blocking timeout guard: prevents hanging agent sessions if pipe is left unclosed
 		return nil
 	}
-	return bytes.TrimSpace(data)
 }
 
 func isBlockingHookEvent(hookEvent string, payload []byte, waitFlag bool) bool {
