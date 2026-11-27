@@ -8,8 +8,16 @@ import { UsagePanel } from './UsagePanel';
 type TabId = 'overview' | 'board' | 'usage' | 'servers' | 'appearance' | 'settings';
 
 export const DashboardApp: React.FC = () => {
-  const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [snapshot, setSnapshot] = useState<AppSnapshot | null>(() => (typeof window !== 'undefined' ? (window as any).__INITIAL_SNAPSHOT__ ?? null : null));
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    if (typeof window !== 'undefined') {
+      const param = new URLSearchParams(window.location.search).get('tab');
+      if (param && ['overview', 'board', 'usage', 'servers', 'appearance', 'settings'].includes(param)) {
+        return param as TabId;
+      }
+    }
+    return 'overview';
+  });
   const [firstRunStep, setFirstRunStep] = useState<1 | 2 | 3>(1);
   const [search, setSearch] = useState('');
   const [agentFilter, setAgentFilter] = useState<'all' | AgentId>('all');
@@ -21,6 +29,8 @@ export const DashboardApp: React.FC = () => {
   const [diagnosticsBundle, setDiagnosticsBundle] = useState<DiagnosticBundle | null>(null);
   const [isRunningDiag, setIsRunningDiag] = useState(false);
   const [diagCopied, setDiagCopied] = useState(false);
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
+  const [confirmClearRules, setConfirmClearRules] = useState(false);
 
   useEffect(() => {
     void window.agentwatch?.getSnapshot().then(setSnapshot);
@@ -373,42 +383,228 @@ export const DashboardApp: React.FC = () => {
                         Note: {conn.limitationNote}
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        onClick={() =>
-                          void (isConnected
-                            ? window.agentwatch?.disconnectAgent(agentId)
-                            : window.agentwatch?.connectAgent(agentId))
-                        }
-                        style={{
-                          padding: '7px 12px',
-                          borderRadius: 'var(--radius-sm)',
-                          border: 'none',
-                          background: isConnected ? 'var(--bg-surface-elevated)' : 'var(--accent-primary)',
-                          color: isConnected ? 'var(--text-primary)' : 'var(--text-on-accent)',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {isConnected ? 'Disconnect' : 'Connect'}
-                      </button>
-                      <button
-                        onClick={() => void window.agentwatch?.recheckAgent(agentId)}
-                        style={{
-                          padding: '7px 10px',
-                          borderRadius: 'var(--radius-sm)',
-                          border: '1px solid var(--border-strong)',
-                          background: 'transparent',
-                          color: 'var(--text-secondary)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Re-check
-                      </button>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {isConnected ? (
+                        <>
+                          <button
+                            onClick={() => void window.agentwatch?.recheckAgent(agentId)}
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid var(--border-strong)',
+                              background: 'var(--bg-surface-elevated)',
+                              color: 'var(--text-primary)',
+                              fontSize: 12,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Re-check status
+                          </button>
+                          <button
+                            onClick={() => void window.agentwatch?.disconnectAgent(agentId)}
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: 'var(--radius-sm)',
+                              border: 'none',
+                              background: 'transparent',
+                              color: 'var(--text-muted)',
+                              fontSize: 12,
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              marginLeft: 'auto',
+                            }}
+                          >
+                            Disconnect
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => void window.agentwatch?.connectAgent(agentId)}
+                            style={{
+                              padding: '7px 14px',
+                              borderRadius: 'var(--radius-sm)',
+                              border: 'none',
+                              background: 'var(--accent-primary)',
+                              color: 'var(--text-on-accent)',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Connect {conn?.displayName ?? agentId}
+                          </button>
+                          <button
+                            onClick={() => void window.agentwatch?.recheckAgent(agentId)}
+                            style={{
+                              padding: '7px 10px',
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid var(--border-strong)',
+                              background: 'transparent',
+                              color: 'var(--text-secondary)',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Re-check
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
               })}
+            </div>
+
+            {/* Recent Sessions Bridge */}
+            <div
+              style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                padding: 16,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong style={{ fontSize: 15 }}>Recent Sessions</strong>
+                <button
+                  onClick={() => setActiveTab('board')}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--accent-primary)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  View all in Board →
+                </button>
+              </div>
+
+              {(snapshot?.sessions ?? []).length === 0 ? (
+                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', padding: '8px 0' }}>
+                  No active or past sessions yet. Start a session in your terminal with <code>claude</code> or <code>codex</code> to see it appear here live.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {(snapshot?.sessions ?? []).slice(0, 3).map((s) => (
+                    <div
+                      key={s.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '10px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--bg-canvas)',
+                        border: '1px solid var(--border-subtle)',
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>
+                            {s.agent === 'claude_code' ? 'Claude Code' : 'Codex'} · {s.folderName}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              padding: '2px 6px',
+                              borderRadius: 'var(--radius-pill)',
+                              background:
+                                s.state === 'needs_you'
+                                  ? 'var(--status-needs-you-bg)'
+                                  : s.state === 'working'
+                                    ? 'var(--status-working-bg)'
+                                    : 'var(--status-done-bg)',
+                              color:
+                                s.state === 'needs_you'
+                                  ? 'var(--status-needs-you)'
+                                  : s.state === 'working'
+                                    ? 'var(--status-working)'
+                                    : 'var(--status-done)',
+                            }}
+                          >
+                            {s.state.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: 'var(--text-secondary)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {s.summary || s.title}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        {s.pendingPermission && !s.pendingPermission.readOnlyInTerminal && (
+                          <>
+                            <button
+                              onClick={() =>
+                                void window.agentwatch?.resolvePermission(s.pendingPermission!.requestId, 'deny', false)
+                              }
+                              style={{
+                                padding: '4px 8px',
+                                fontSize: 11,
+                                borderRadius: 'var(--radius-sm)',
+                                border: '1px solid var(--border-strong)',
+                                background: 'var(--status-error-bg)',
+                                color: 'var(--status-error)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Deny
+                            </button>
+                            <button
+                              onClick={() =>
+                                void window.agentwatch?.resolvePermission(s.pendingPermission!.requestId, 'allow', false)
+                              }
+                              style={{
+                                padding: '4px 8px',
+                                fontSize: 11,
+                                borderRadius: 'var(--radius-sm)',
+                                border: 'none',
+                                background: 'var(--accent-primary)',
+                                color: 'var(--text-on-accent)',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Allow
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => void handleOpenTerminal(s.id)}
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            borderRadius: 'var(--radius-sm)',
+                            border: '1px solid var(--border-strong)',
+                            background: 'var(--bg-surface-elevated)',
+                            color: 'var(--text-primary)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Terminal
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* How it works */}
@@ -1023,21 +1219,59 @@ export const DashboardApp: React.FC = () => {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong style={{ fontSize: 15 }}>Always-Allow Rules ({rules.length})</strong>
-                {rules.length > 0 && (
-                  <button
-                    onClick={() => void window.agentwatch?.clearRules()}
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-strong)',
-                      background: 'var(--status-error-bg)',
-                      color: 'var(--status-error)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Clear all
-                  </button>
-                )}
+                {rules.length > 0 &&
+                  (confirmClearRules ? (
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: 'var(--status-error)' }}>Clear all {rules.length} rules?</span>
+                      <button
+                        onClick={() => {
+                          void window.agentwatch?.clearRules();
+                          setConfirmClearRules(false);
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          borderRadius: 'var(--radius-sm)',
+                          border: 'none',
+                          background: 'var(--status-error)',
+                          color: '#ffffff',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Yes, clear all
+                      </button>
+                      <button
+                        onClick={() => setConfirmClearRules(false)}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--border-strong)',
+                          background: 'transparent',
+                          color: 'var(--text-secondary)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmClearRules(true)}
+                      style={{
+                        padding: '5px 10px',
+                        fontSize: 11,
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border-strong)',
+                        background: 'transparent',
+                        color: 'var(--status-error)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Clear all rules
+                    </button>
+                  ))}
               </div>
               {rules.length === 0 ? (
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -1220,19 +1454,6 @@ export const DashboardApp: React.FC = () => {
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
-                  onClick={() => void window.agentwatch?.clearHistory()}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--border-strong)',
-                    background: 'var(--status-error-bg)',
-                    color: 'var(--status-error)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Clear history
-                </button>
-                <button
                   onClick={() => void window.agentwatch?.openLogsFolder()}
                   style={{
                     padding: '6px 12px',
@@ -1380,6 +1601,99 @@ export const DashboardApp: React.FC = () => {
                   })}
                 </div>
               )}
+            </section>
+
+            <section
+              style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--status-error)',
+                borderRadius: 'var(--radius-md)',
+                padding: 16,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <div>
+                <strong style={{ fontSize: 15, color: 'var(--status-error)' }}>Danger Zone</strong>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
+                  Irreversible actions that purge local session histories or permission rules.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-canvas)',
+                  border: '1px solid var(--border-subtle)',
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>Purge Session History</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginTop: 2 }}>
+                    Permanently wipe all locally stored session transcripts, events, and turn records ({snapshot?.settings.data.retentionDays ?? 90}-day retention cache).
+                  </div>
+                </div>
+                {confirmClearHistory ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: 11, color: 'var(--status-error)', fontWeight: 600 }}>Are you sure?</span>
+                    <button
+                      onClick={() => {
+                        void window.agentwatch?.clearHistory();
+                        setConfirmClearHistory(false);
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: 'none',
+                        background: 'var(--status-error)',
+                        color: '#ffffff',
+                        fontWeight: 600,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Yes, wipe history
+                    </button>
+                    <button
+                      onClick={() => setConfirmClearHistory(false)}
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border-strong)',
+                        background: 'transparent',
+                        color: 'var(--text-secondary)',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmClearHistory(true)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--status-error)',
+                      background: 'var(--status-error-bg)',
+                      color: 'var(--status-error)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                  >
+                    Clear history
+                  </button>
+                )}
+              </div>
             </section>
 
             <section

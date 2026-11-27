@@ -52,7 +52,7 @@ const STATE_COLOR: Record<SessionRecord['state'], string> = {
 };
 
 export const OverlayApp: React.FC = () => {
-  const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<AppSnapshot | null>(() => (typeof window !== 'undefined' ? (window as any).__INITIAL_SNAPSHOT__ ?? null : null));
 
   useEffect(() => {
     void window.agentwatch?.getSnapshot().then(setSnapshot);
