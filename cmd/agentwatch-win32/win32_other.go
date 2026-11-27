@@ -24,6 +24,10 @@ func isForegroundFullscreen() bool {
 	return false
 }
 
+func getCommandLineForPid(_ uint32) string {
+	return ""
+}
+
 func killProcessTree(_ uint32) error {
 	return errors.New("win32 kill-tree only supported on Windows")
 }

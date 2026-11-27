@@ -34,6 +34,7 @@ export function shortenDevCommand(commandLine: string, fallbackExe: string): str
 export class DevServerTracker {
   private entries: DevServerEntry[] = [];
   private firstDetectedAt = new Map<string, number>();
+  private commandLineCache = new Map<number, string>();
 
   constructor(private readonly driver: PlatformDriver) {}
 
@@ -98,7 +99,23 @@ export class DevServerTracker {
       });
     }
 
-    const cmdLines = await this.driver.getCommandLinesForPids(matched.map((m) => m.pid));
+    // Only fetch command lines for newly encountered PIDs (cached for process lifetime)
+    const uncachedPids = matched.map((m) => m.pid).filter((pid) => !this.commandLineCache.has(pid));
+    if (uncachedPids.length > 0) {
+      const fetched = await this.driver.getCommandLinesForPids(uncachedPids);
+      for (const [pidStr, cmd] of Object.entries(fetched)) {
+        if (cmd) this.commandLineCache.set(Number(pidStr), cmd);
+      }
+    }
+
+    // Prune exited PIDs from cache to prevent unbounded growth
+    const activePidSet = new Set(processes.map((p) => p.pid));
+    for (const cachedPid of this.commandLineCache.keys()) {
+      if (!activePidSet.has(cachedPid)) {
+        this.commandLineCache.delete(cachedPid);
+      }
+    }
+
     const now = Date.now();
     const nextEntries: DevServerEntry[] = [];
     const activeKeys = new Set<string>();
@@ -109,7 +126,7 @@ export class DevServerTracker {
       if (!this.firstDetectedAt.has(id)) {
         this.firstDetectedAt.set(id, now);
       }
-      const cmd = cmdLines[m.pid] || m.exeName;
+      const cmd = this.commandLineCache.get(m.pid) || m.exeName;
       nextEntries.push({
         id,
         pid: m.pid,
